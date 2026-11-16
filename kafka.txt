@@ -1,0 +1,484 @@
+APACHE KAFKA
+
+1. WHAT IS APACHE KAFKA?
+
+Apache Kafka is an open-source, distributed event-streaming platform. It
+is used to transfer, store, and process streams of events between
+applications and services.
+
+In simple terms, Kafka acts as a highly scalable messaging system. One
+application can publish a message to Kafka, and one or more other
+applications can read that message independently.
+
+Example: - An order service receives a new customer order. - It
+publishes an “OrderCreated” event to Kafka. - The inventory service
+reads the event and reserves stock. - The notification service reads the
+same event and sends an email. - The analytics service reads the event
+and updates reports.
+
+The order service does not need to call every other service directly. It
+only needs to publish the event to Kafka.
+
+2. WHY DO WE NEED KAFKA?
+
+In a traditional tightly coupled design, one service may call several
+other services synchronously. This can create problems:
+
+-   If one downstream service is unavailable, the calling service may
+    fail.
+-   Services become dependent on each other’s availability and response
+    time.
+-   A sudden increase in traffic can overload downstream services.
+-   It can be difficult to distribute the same event to multiple
+    consumers.
+-   A slow consumer can affect the overall request flow if everything is
+    synchronous.
+
+Kafka helps by separating producers from consumers. Producers publish
+events, and consumers process them when they are ready.
+
+3. HIGH-LEVEL KAFKA ARCHITECTURE
+
+A typical Kafka flow looks like this:
+
+    Producer
+       |
+       | publishes event
+       v
+    Kafka Topic
+       |
+       +-------------------+
+       |                   |
+       v                   v
+    Consumer A          Consumer B
+    (Inventory)         (Notification)
+
+A producer writes records to a topic. Consumers subscribe to that topic
+and read the records.
+
+4. IMPORTANT KAFKA COMPONENTS
+
+4.1 Producer A producer is an application or service that sends records
+to Kafka.
+
+Example: An Order Service publishes an OrderCreated event.
+
+4.2 Consumer A consumer is an application that reads records from Kafka.
+
+Example: An Inventory Service consumes OrderCreated events and reserves
+stock.
+
+4.3 Topic A topic is a named stream or category of records in Kafka.
+
+Examples: - orders - payments - customer-events - notifications
+
+Producers write to topics, and consumers read from topics.
+
+4.4 Partition A topic is divided into one or more partitions. A
+partition is an ordered, append-only sequence of records.
+
+Partitions allow Kafka to distribute data and processing across multiple
+brokers and consumers.
+
+Important: - Ordering is guaranteed within a partition. - Kafka does not
+generally guarantee ordering across all partitions of a topic. - Records
+with the same key are normally routed to the same partition, which helps
+preserve order for that key.
+
+Example: An orders topic may have three partitions:
+
+    orders
+      |-- Partition 0: Order 101, Order 104, Order 107
+      |-- Partition 1: Order 102, Order 105, Order 108
+      |-- Partition 2: Order 103, Order 106, Order 109
+
+The actual partition assignment depends on the producer’s partitioning
+strategy and record key.
+
+4.5 Broker A broker is a Kafka server that stores topic partitions and
+serves producer and consumer requests.
+
+A Kafka cluster usually contains multiple brokers.
+
+Example:
+
+    Kafka Cluster
+       |-- Broker 1
+       |-- Broker 2
+       |-- Broker 3
+
+Partitions are distributed across brokers to support scalability and
+availability.
+
+4.6 Replication Kafka can keep copies of partitions on multiple brokers.
+
+-   A leader replica handles normal reads and writes for a partition.
+-   Follower replicas copy data from the leader.
+-   If a leader broker fails, Kafka can elect an eligible replica as the
+    new leader.
+
+Replication helps protect data against broker failures. The actual
+durability guarantee depends on replication settings, acknowledgements,
+and in-sync replicas.
+
+4.7 Offset An offset is the position of a record within a partition.
+
+Example:
+
+    Partition 0
+    Offset: 0   -> Order A
+    Offset: 1   -> Order B
+    Offset: 2   -> Order C
+    Offset: 3   -> Order D
+
+Offsets are partition-specific. A consumer uses offsets to track its
+reading position.
+
+4.8 Consumer Group A consumer group is a set of consumers that work
+together to read a topic.
+
+Kafka assigns each partition to one consumer within a consumer group at
+a time.
+
+Example:
+
+    Topic: orders (3 partitions)
+
+    Consumer Group: inventory-group
+       Consumer 1 -> Partition 0
+       Consumer 2 -> Partition 1
+       Consumer 3 -> Partition 2
+
+If the group has more consumers than partitions, some consumers will be
+idle for that topic.
+
+Different consumer groups can independently read the same topic. For
+example, inventory-group and notification-group can each receive all
+records from orders.
+
+4.9 ZooKeeper and KRaft Older Kafka deployments used ZooKeeper for
+cluster metadata and coordination. Modern Kafka supports KRaft, Kafka’s
+built-in consensus mechanism, which removes the ZooKeeper dependency.
+New Kafka deployments generally use KRaft mode.
+
+5. HOW KAFKA WORKS: STEP BY STEP
+
+Consider an e-commerce application.
+
+Step 1: A customer places an order.
+
+Step 2: The Order Service creates an event, for example:
+
+    {
+      "orderId": 101,
+      "customerId": 501,
+      "amount": 2500,
+      "status": "CREATED"
+    }
+
+Step 3: The producer sends this record to the “orders” topic.
+
+Step 4: Kafka selects a partition. If a key such as orderId is provided,
+the partitioner normally uses that key to choose a partition.
+
+Step 5: The broker appends the record to the partition log and responds
+according to the producer’s acknowledgement configuration.
+
+Step 6: Consumers in subscribed consumer groups fetch records from their
+assigned partitions.
+
+Step 7: A consumer processes the record.
+
+Step 8: The consumer commits an offset to record its progress. With
+manual acknowledgement or offset commits, the application controls when
+progress is recorded.
+
+Important: Kafka does not automatically know whether your business
+operation completed successfully. Your consumer application must
+coordinate processing and offset commits appropriately.
+
+6. HOW KAFKA STORES MESSAGES
+
+Kafka stores records in partition logs on disk.
+
+Records are appended to the end of a partition. Kafka does not normally
+remove a record immediately after a consumer reads it.
+
+Instead, records are retained according to topic configuration, such
+as: - Retention time (for example, keep records for seven days). -
+Retention size (keep data up to a configured size). - Log compaction
+(retain the latest value for each key, subject to compaction behavior).
+
+This allows multiple consumer groups to read the same data independently
+and allows consumers to replay records while the data is still retained.
+
+7. HOW KAFKA CONSUMER POLLING WORKS
+
+Kafka consumers fetch records by polling the broker.
+
+In the Java Kafka client, a consumer commonly uses poll() to retrieve
+records.
+
+Conceptually:
+
+    while (running) {
+        records = consumer.poll(timeout);
+
+        for (record : records) {
+            process(record);
+        }
+
+        consumer.commitSync();
+    }
+
+The exact implementation depends on the framework and offset management
+strategy.
+
+Important consumer settings:
+
+-   group.id: Identifies the consumer group.
+
+-   max.poll.records: Maximum number of records returned by one poll()
+    call.
+
+-   max.poll.interval.ms: Maximum allowed delay between calls to poll()
+    before the consumer may be considered unable to make progress and
+    removed from the group.
+
+-   session.timeout.ms: Controls how long the group coordinator waits
+    without receiving heartbeats before considering a consumer
+    unavailable. The permitted range depends on broker configuration.
+
+-   heartbeat.interval.ms: The interval at which the consumer sends
+    heartbeats. It is normally configured below session.timeout.ms.
+
+-   enable.auto.commit: Controls whether offsets are committed
+    automatically by the Kafka consumer client. Frameworks such as
+    Spring Kafka can provide their own acknowledgement and commit
+    mechanisms.
+
+8. WHAT IS A KAFKA REBALANCE?
+
+A rebalance is the process of redistributing topic partitions among
+consumers in a consumer group.
+
+A rebalance can happen when: - A new consumer joins the group. - An
+existing consumer shuts down or leaves. - A consumer fails or stops
+sending heartbeats. - Topic partitions change. - Certain subscription or
+group membership changes occur.
+
+Example:
+
+Before rebalance:
+
+    Consumer 1 -> Partition 0, Partition 1
+    Consumer 2 -> Partition 2
+
+Consumer 3 joins the group.
+
+After rebalance, Kafka may assign:
+
+    Consumer 1 -> Partition 0
+    Consumer 2 -> Partition 1
+    Consumer 3 -> Partition 2
+
+The exact assignment depends on the configured partition assignment
+strategy.
+
+During a rebalance, partition ownership changes. Applications should
+handle revocation and assignment correctly and should avoid committing
+offsets for partitions they no longer own.
+
+9. WHAT ARE THE ADVANTAGES OF APACHE KAFKA?
+
+9.1 High Throughput Kafka can handle large volumes of records by writing
+data sequentially and distributing partitions across brokers.
+
+9.2 Scalability You can increase capacity by adding brokers and
+partitions, while considering partition count, key distribution, and
+consumer capacity.
+
+9.3 Fault Tolerance Replication allows Kafka to continue operating when
+a broker fails, provided suitable replicas remain available and the
+cluster is configured correctly.
+
+9.4 Decoupling of Services Producers do not need direct knowledge of
+consumer services. This reduces dependencies between microservices.
+
+9.5 Message Retention and Replay Kafka retains records for a configured
+period or size. Consumers can read records again by resetting their
+offsets, as long as the records are still available.
+
+9.6 Multiple Consumers Different consumer groups can read the same topic
+independently.
+
+Example: The same OrderCreated event can be consumed by: - Inventory
+Service - Payment Service - Notification Service - Analytics Service
+
+9.7 Horizontal Processing Partitions can be processed by multiple
+consumers in a consumer group, allowing parallel processing.
+
+9.8 Durable Storage Kafka writes records to disk and supports
+replication. Durability depends on producer acknowledgements,
+replication factor, in-sync replica settings, and operational
+configuration.
+
+9.9 Real-Time Event Streaming Kafka is useful for event-driven
+applications, streaming data pipelines, log aggregation, monitoring, and
+real-time analytics.
+
+10. WHERE IS KAFKA USED?
+
+Common use cases include:
+
+-   Microservice communication.
+-   E-commerce order and payment events.
+-   Banking transaction event streams.
+-   Log collection and aggregation.
+-   Real-time analytics.
+-   Fraud detection pipelines.
+-   IoT event processing.
+-   Data integration between systems.
+-   Change Data Capture (CDC) pipelines.
+
+11. KAFKA VS TRADITIONAL MESSAGE QUEUES
+
+Kafka and traditional message brokers both support asynchronous
+messaging, but their designs and common use cases differ.
+
+Kafka: - Distributed event log with partitioned storage. - Records are
+retained according to configured policies. - Multiple consumer groups
+can independently read the same records. - Designed for high-throughput
+event streaming and replay.
+
+Traditional queue-based messaging: - Often focuses on delivering
+messages to consumers and removing or acknowledging them according to
+queue semantics. - Commonly used for task distribution and work
+queues. - Exact behavior depends on the broker and its configuration.
+
+Kafka can also be used for work distribution, but it is important to
+understand its partition and consumer-group model.
+
+12. KAFKA DELIVERY SEMANTICS
+
+At-most-once: A record may be lost, but it is not processed more than
+once by the application under the chosen processing model.
+
+At-least-once: A record is not intentionally skipped, but it may be
+processed more than once. Applications should make processing idempotent
+where possible.
+
+Exactly-once: Kafka supports exactly-once processing capabilities in
+specific Kafka workflows, including transactions and Kafka Streams.
+End-to-end exactly-once behavior requires careful design. External
+database or API side effects are not automatically made exactly-once
+just because Kafka transactions are enabled.
+
+13. KAFKA WITH JAVA AND SPRING BOOT
+
+Spring for Apache Kafka provides integration between Spring applications
+and Kafka.
+
+Common annotations and classes:
+
+-   @KafkaListener: Marks a method as a Kafka message listener.
+
+-   KafkaTemplate: Used to publish records to Kafka.
+
+-   ConsumerRecord: Contains the consumed record, including topic,
+    partition, offset, key, and value.
+
+-   Acknowledgment: Used for manual acknowledgement when the listener
+    container is configured with an appropriate acknowledgement mode.
+
+Simple producer example:
+
+    @Service
+    public class OrderProducer {
+
+        private final KafkaTemplate<String, String> kafkaTemplate;
+
+        public OrderProducer(
+                KafkaTemplate<String, String> kafkaTemplate) {
+            this.kafkaTemplate = kafkaTemplate;
+        }
+
+        public void sendOrder(String message) {
+            kafkaTemplate.send("orders", message);
+        }
+    }
+
+Simple consumer example:
+
+    @Service
+    public class OrderConsumer {
+
+        @KafkaListener(
+            topics = "orders",
+            groupId = "inventory-group"
+        )
+        public void consume(String message) {
+            System.out.println("Received: " + message);
+        }
+    }
+
+These are illustrative snippets. A complete application also needs Kafka
+connection configuration, serialization settings, topic setup, and
+appropriate error handling.
+
+14. IMPORTANT POINTS TO REMEMBER
+
+1.  A producer publishes records to a topic.
+
+2.  A consumer reads records from a topic.
+
+3.  A topic is divided into partitions.
+
+4.  A broker is a Kafka server.
+
+5.  An offset identifies a record’s position within a partition.
+
+6.  A consumer group allows consumers to share partition processing.
+
+7.  Different consumer groups can independently read the same topic.
+
+8.  Ordering is guaranteed within a partition, not across all
+    partitions.
+
+9.  Replication helps protect against broker failures.
+
+10. Kafka retains records according to configured retention policies.
+
+11. A rebalance redistributes partitions among consumers in a group.
+
+12. Offset management is important to avoid losing progress or
+    processing records more than once.
+
+13. SIMPLE REAL-WORLD EXAMPLE
+
+Imagine a customer places an order for a mobile phone.
+
+    Customer
+       |
+       v
+    Order Service
+       |
+       | publishes OrderCreated
+       v
+    Kafka: orders topic
+       |
+       +--------------------+--------------------+
+       |                    |                    |
+       v                    v                    v
+    Inventory Service   Payment Service    Notification Service
+       |                    |                    |
+       v                    v                    v
+    Reserve stock       Process payment     Send confirmation
+
+The Order Service publishes one event. Multiple independent services
+consume it and perform their own work.
+
+This is the core idea behind Kafka: reliable, scalable event streaming
+that helps applications communicate asynchronously.
+
+END OF DOCUMENT

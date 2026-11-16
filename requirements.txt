@@ -1,0 +1,13 @@
+langchain
+python-dotenv
+langchain-openai
+langchain-huggingface
+huggingface-hub
+pydantic
+pydantic[email]
+grandalf
+langchain-anthropic
+langchain-classic
+langchain-community
+pypdf
+bs4
