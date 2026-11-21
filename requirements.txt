@@ -11,3 +11,4 @@ langchain-classic
 langchain-community
 pypdf
 bs4
+langchain-text-splitters
